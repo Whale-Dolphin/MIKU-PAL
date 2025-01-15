@@ -1,5 +1,6 @@
 *.jpg
 *.mp4
+*.pt
 test.ipynb
 
 checkpoints/

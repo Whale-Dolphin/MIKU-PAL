@@ -53,8 +53,8 @@ class Detector(ABC):
         if shrink != 1.0:
             video_tensor = F.interpolate(video_tensor, scale_factor=shrink, mode='bilinear', align_corners=False)
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        return (video_tensor - mean) / std
+        # std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        return (video_tensor - mean) * 255.0
 
     @torch.no_grad()
     def detect(
@@ -87,6 +87,7 @@ class Detector(ABC):
         raise NotImplementedError
 
     def _batched_detect(self, image: torch.Tensor) -> typing.List[np.ndarray]:
+        torch.save(image.cpu(), "test.pt")
         boxes = self._detect(image)
         boxes = self.filter_boxes(boxes)
         if self.clip_boxes:
