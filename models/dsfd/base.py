@@ -53,7 +53,6 @@ class Detector(ABC):
         if shrink != 1.0:
             video_tensor = F.interpolate(video_tensor, scale_factor=shrink, mode='bilinear', align_corners=False)
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        # std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
         return (video_tensor - mean) * 255.0
 
     @torch.no_grad()
@@ -67,6 +66,8 @@ class Detector(ABC):
             np.ndarray: a list with N set of bounding boxes of
                 shape [B, 5] with (xmin, ymin, xmax, ymax, score)
         """
+        if video_tensor.dim() == 3:
+            video_tensor = video_tensor.unsqueeze(0)
         video_tensor = self.process_video(video_tensor, shrink)
         video_tensor = video_tensor.to(self.device)
         boxes = self._batched_detect(video_tensor)
