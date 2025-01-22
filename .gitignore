@@ -1,8 +1,11 @@
 *.jpg
 *.mp4
 *.pt
+*.log
 test.ipynb
 
 checkpoints/
 *__pycache__/
 outputs/
+*fish_data_engine/
+dataset/
