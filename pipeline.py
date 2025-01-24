@@ -8,7 +8,7 @@ from loguru import logger
 from models.fish_data_engine.tasks.uvr import UVR
 from models.fish_data_engine.tasks.align import WhisperAlignTask
 from models.fish_data_engine.tasks.asr import ASR
-
+from models.dsfd.inference import FaceDetect
 
 logger.add('pipeline.log', format="{time} {level} {message}", level="DEBUG")
 
@@ -93,4 +93,36 @@ class Pipeline:
         )
         asr.run()
 
-    def run_face_detect()
+    def run_face_detect(
+        self,
+        input_dir=None,
+        output_dir=None,
+        confidence_threshold=0.5,
+        nms_iou_threshold=0.3,
+        max_resolution=640,
+        shrink=1,
+        device='cuda',
+        fp16_inference=True,
+        clip_boxes=True,
+        model_path='checkpoints/dsfd.pth',
+        data_name='face_detect',
+    ):
+        if input_dir is None:
+            input_dir = os.path.join(self.input_dir, 'face_detect')
+        if output_dir is None:
+            output_dir = os.path.join(self.output_dir, 'face_detect')
+        
+        logger.debug(f'Running Face Detect with input={input_dir}, output={output_dir}')
+
+        face_detect = FaceDetect(
+            confidence_threshold=confidence_threshold,
+            nms_iou_threshold=nms_iou_threshold,
+            max_resolution=max_resolution,
+            device=device,
+            fp16_inference=fp16_inference,
+            clip_boxes=clip_boxes,
+            model_path=model_path
+        )
+
+        face_detect.process_videos(input_dir, output_dir, data_name)
+

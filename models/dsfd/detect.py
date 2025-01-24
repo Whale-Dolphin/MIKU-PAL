@@ -20,7 +20,7 @@ class DSFDDetector(Detector):
         super().__init__(*args, **kwargs)
         model_path = kwargs.get('model_path', None)
         if model_path and os.path.exists(model_path):
-            state_dict = torch.load(model_path, map_location=self.device)
+            state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
         else:
             state_dict = load_state_dict_from_url(
             model_url,

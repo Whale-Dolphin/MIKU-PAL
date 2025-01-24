@@ -2,6 +2,10 @@
 
 This repository contains the code for our ACM MM 2021 paper (oral), TalkNet, an active speaker detection model to detect 'whether the face in the screen is speaking or not?'. [[Paper](https://arxiv.org/pdf/2107.06592.pdf)]    [[Video_English](https://youtu.be/C6bpAgI9zxE)]    [[Video_Chinese](https://www.bilibili.com/video/bv1Yw411d7HG)].
 
+### Updates:
+
+A new [demo page](https://www.sievedata.com/functions/sieve/talknet-asd). Thanks the contribution from [mvoodarla](https://github.com/mvoodarla) !
+
 ![overall.png](utils/overall.png)
 
 - [**Awesome ASD**](https://github.com/TaoRuijie/TalkNet_ASD/blob/main/awesomeASD.md): Papers about active speaker detection in last years.
@@ -136,3 +140,7 @@ AVA data download code is learnt from this [repository](https://github.com/fuank
 The model for the visual frontend is learnt from this [repository](https://github.com/lordmartian/deep_avsr).
 
 Thanks for these authors to open source their code!
+
+### Cooperation
+
+If you are interested to work on this topic and have some ideas to implement, I am glad to collaborate and contribute with my experiences & knowlegde in this topic. Please contact me with ruijie.tao@u.nus.edu.
