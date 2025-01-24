@@ -2,10 +2,11 @@
 *.mp4
 *.pt
 *.log
-test.ipynb
+*.ipynb
 
 checkpoints/
 *__pycache__/
 outputs/
 *fish_data_engine/
 dataset/
+
