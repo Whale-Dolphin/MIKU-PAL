@@ -1,16 +1,31 @@
 import sys
 import os
+import glob
 
-sys.path.append('models/')
-
+import av
 from loguru import logger
+from torchvision.io import read_video
+from tqdm import tqdm
 
 from models.fish_data_engine.tasks.uvr import UVR
 from models.fish_data_engine.tasks.align import WhisperAlignTask
 from models.fish_data_engine.tasks.asr import ASR
 from models.dsfd.inference import FaceDetect
+from models.TalkNet_ASD.inference import crop_video
 
 logger.add('pipeline.log', format="{time} {level} {message}", level="DEBUG")
+
+
+def get_video_fps(video_path):
+    try:
+        with av.open(video_path) as container:
+            video_stream = container.streams.video[0]
+            fps = video_stream.average_rate
+            return fps
+    except Exception as e:
+        print(f"Error reading video: {e}")
+        return None
+
 
 class Pipeline:
     def __init__(self, input_dir, output_dir):
@@ -95,8 +110,7 @@ class Pipeline:
 
     def run_face_detect(
         self,
-        input_dir=None,
-        output_dir=None,
+        frames,
         confidence_threshold=0.5,
         nms_iou_threshold=0.3,
         max_resolution=640,
@@ -106,15 +120,10 @@ class Pipeline:
         clip_boxes=True,
         model_path='checkpoints/dsfd.pth',
         data_name='face_detect',
-    ):
-        if input_dir is None:
-            input_dir = os.path.join(self.input_dir, 'face_detect')
-        if output_dir is None:
-            output_dir = os.path.join(self.output_dir, 'face_detect')
-        
-        logger.debug(f'Running Face Detect with input={input_dir}, output={output_dir}')
+    ):  
+        # logger.debug(f'Running Face Detect with input={input_dir}, output={output_dir}')
 
-        face_detect = FaceDetect(
+        self.fd = FaceDetect(
             confidence_threshold=confidence_threshold,
             nms_iou_threshold=nms_iou_threshold,
             max_resolution=max_resolution,
@@ -124,5 +133,50 @@ class Pipeline:
             model_path=model_path
         )
 
-        face_detect.process_videos(input_dir, output_dir, data_name)
+    def run_asd(
+        self,
+        input_path,
+        asr_output_path,
+        output_path,
+        model_path = 'checkpoints/pretrain_TalkSet.model',
+        numFailedDet = 10,
+        minTrack = 10,
+        minFaceSize = 1,
+
+    ):
+        logger.debug(f'Running ASD with input={input_dir}, output={output_dir}')
+
+        fps = get_video_fps(input_path)
+        with open(asr_output_path, 'r') as f:
+            data = json.laod(f)
+    
+        allTracks, vidTracks = [], []
+
+        for scene in data:
+            scene_start = scene['start']
+            scene_end = scene['end']
+
+            frames, audios, info = read_video(
+                video_path=input_path,
+                start_pts=scene_start,
+                end_pts=scene_end,
+                pts_unit='sec')
+
+            info['fps'] = fps
+
+            faces = self.fd.run(frames)
+
+            allTracks.extend(track_shot(numFailedDet, minTrack, minFaceSize, faces))
+
+        cropPath = f'{output_path}/croped'
+        for ii, track in tqdm(enumerate(allTracks), total=len(allTracks)):
+            vidTracks.append(crop_video(frames, audios, track, info,
+                                        f'{cropPath}/{ii:05d}'))
+
+        files = glob.glob("%s/*.avi" % cropPath)
+
+        files.sort()
+        scores = evaluate_network(files, model_path, cropPath)
+
+        
 

@@ -1,6 +1,7 @@
 import os
 import math
 
+import av
 import numpy as np
 import cv2
 import soundfile as sf
@@ -8,12 +9,41 @@ import torch
 from scipy import signal
 from scipy.io import wavfile
 from scipy.interpolate import interp1d
+import torchvision
+import torchvision.transforms.functional as F
 from torchvision import transforms
 from einops import rearrange
 import python_speech_features
 from tqdm import tqdm
 
-from models.TalkNet_ASD.talknet import talkNet
+from models.TalkNet_ASD.talkNet import talkNet
+
+
+def write_video_pyav(filename, video_tensor, fps):
+
+    container = av.open(filename, mode='w')
+    stream = container.add_stream('h264', rate=fps)
+    stream.width = video_tensor.shape[2]
+    stream.height = video_tensor.shape[1]
+    stream.pix_fmt = 'yuv420p'
+
+    for frame in video_tensor:
+        frame = frame.cpu().numpy()
+        if frame.dtype != np.uint8:
+            if frame.max() <= 1.0:
+                frame = (frame * 255).astype(np.uint8)
+            else:
+                frame = frame.astype(np.uint8)
+
+        frame = av.VideoFrame.from_ndarray(frame, format='rgb24')
+        packet = stream.encode(frame)
+        container.mux(packet)
+
+    packet = stream.encode(None)
+    container.mux(packet)
+
+    container.close()
+
 
 def bb_intersection_over_union(boxA, boxB, evalCol=False):
 	# CPU: IOU Function to calculate overlap between two image
@@ -66,7 +96,7 @@ def track_shot(numFailedDet, minTrack, minFaceSize, sceneFaces):
 	return tracks
 
 
-def crop_video(video_tensor, audio_tensor, track, info, crop_file):
+def crop_video(video_tensor, audio_tensor, track, info, crop_file, cropScale=0.40):
     """Crops a video and audio tensor based on tracking data and saves the result to local.
 
     Args:
@@ -96,48 +126,54 @@ def crop_video(video_tensor, audio_tensor, track, info, crop_file):
     dets['x'] = signal.medfilt(dets['x'], kernel_size=13)
     dets['y'] = signal.medfilt(dets['y'], kernel_size=13)
 
+    cs = cropScale
     cropped_frames = []
     for fidx, frame_index in enumerate(track['frame']):
         if frame_index >= video_tensor.shape[0]:
             continue
-        frame = video_tensor[frame_index].numpy() * 255
-        frame = frame.astype(np.uint8)
+        frame = video_tensor[frame_index]
         bs = dets['s'][fidx]
-        bsi = int(bs * (1 + 2 * 1.0))
+        bsi = int(bs * (1 + 2 * cs))
+        print(frame.shape)
 
-        # Pad the frame
-        frame = np.pad(frame, ((bsi, bsi), (bsi, bsi), (0, 0)),
-                       'constant', constant_values=(110, 110))
+        padded_frame = F.pad(
+            rearrange(frame, 'h w c -> c h w'),
+            padding=[bsi, bsi, bsi, bsi],
+            fill=110
+        )
 
         my = dets['y'][fidx] + bsi
         mx = dets['x'][fidx] + bsi
-        try:
-            face = frame[int(my - bs):int(my + bs * (1 + 2 * 1.0)),
-                         int(mx - bs * (1 + 1.0)):int(mx + bs * (1 + 1.0))]
-        except:
-            continue
-        face = cv2.resize(face, (224, 224))
 
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[
-                                 0.229, 0.224, 0.225])
-        ])
-        face_tensor = transform(face)
-        cropped_frames.append(face_tensor)
+        my = dets['y'][fidx] + bsi
+        mx = dets['x'][fidx] + bsi
+
+        y1 = int(my - bs)
+        y2 = int(my + bs * (1 + 2*cs))
+        x1 = int(mx - bs * (1 + cs))
+        x2 = int(mx + bs * (1 + cs))
+
+        face = padded_frame[:, y1:y2, x1:x2]
+
+        print(face.shape)
+        resized_face = F.resize(face, [224, 224])
+
+        cropped_frames.append(resized_face)
 
     if len(cropped_frames) == 0:
         return None
 
     cropped_video_tensor = torch.stack(cropped_frames)
 
-    video_path = crop_file + ".avi"
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(video_path, fourcc, video_fps, (224, 224))
-    for frame in cropped_video_tensor:
-        frame = (frame.numpy() * 255).astype(np.uint8)
-        out.write(frame)
-    out.release()
+    # cropped_video_tensor = (cropped_video_tensor * 255).to(torch.uint8)
+    cropped_video_tensor = cropped_video_tensor.permute(0, 2, 3, 1)
+
+    video_path = crop_file + ".mp4"
+    write_video_pyav(
+        video_path,
+        cropped_video_tensor.cpu(),
+        fps=info['fps']
+    )
 
     audio_start_frame = track['frame'][0]
     audio_end_frame = track['frame'][-1]
@@ -148,6 +184,7 @@ def crop_video(video_tensor, audio_tensor, track, info, crop_file):
     cropped_audio = audio_tensor[:, audio_start_sample:audio_end_sample]
     audio_path = crop_file + ".wav"
     cropped_audio = rearrange(cropped_audio, 'c s -> s c')
+    print(audio_path, cropped_audio.shape, audio_sample_rate)
     sf.write(audio_path, cropped_audio.numpy(), audio_sample_rate, format='WAV')
 
     return {'track': track, 'proc_track': dets, 'video_path': video_path, 'audio_path': audio_path}
@@ -161,10 +198,11 @@ def evaluate_network(files, pretrainModel, pycropPath):
 	durationSet = {1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6}
 	for file in tqdm(files, total=len(files)):
 		fileName = os.path.splitext(file.split('/')[-1])[0]
+		print(fileName)
 		_, audio = wavfile.read(os.path.join(pycropPath, fileName + '.wav'))
 		audioFeature = python_speech_features.mfcc(
 			audio, 16000, numcep=13, winlen=0.025, winstep=0.010)
-		video = cv2.VideoCapture(os.path.join(pycropPath, fileName + '.avi'))
+		video = cv2.VideoCapture(os.path.join(pycropPath, fileName + '.mp4'))
 		videoFeature = []
 		while video.isOpened():
 			ret, frames = video.read()
@@ -174,6 +212,7 @@ def evaluate_network(files, pretrainModel, pycropPath):
 				face = face[int(112-(112/2)):int(112+(112/2)),
                                     int(112-(112/2)):int(112+(112/2))]
 				videoFeature.append(face)
+				print(videoFeature)
 			else:
 				break
 		video.release()
@@ -181,6 +220,7 @@ def evaluate_network(files, pretrainModel, pycropPath):
 		length = min((audioFeature.shape[0] - audioFeature.shape[0] %
 		             4) / 100, videoFeature.shape[0] / 25)
 		audioFeature = audioFeature[:int(round(length * 100)), :]
+		print(videoFeature.shape)
 		videoFeature = videoFeature[:int(round(length * 25)), :, :]
 		allScore = []  # Evaluation use TalkNet
 		for duration in durationSet:
@@ -203,3 +243,5 @@ def evaluate_network(files, pretrainModel, pycropPath):
 			(np.mean(np.array(allScore), axis=0)), 1).astype(float)
 		allScores.append(allScore)
 	return allScores
+
+
