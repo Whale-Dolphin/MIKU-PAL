@@ -5,6 +5,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 import av
+import click
 from loguru import logger
 from torchvision.io import read_video
 from tqdm import tqdm
@@ -63,10 +64,6 @@ class Pipeline:
     def __init__(self, input_dir, output_dir):
         self.input_dir = input_dir
         self.output_dir = output_dir
-
-    def run(self):
-        self.run_uvr()
-        self.run_asr()
 
     def run_uvr(
         self,
@@ -284,15 +281,25 @@ class Pipeline:
         for video_file in video_files:
             best_track, best_score = self.run_asd(f"{video_file}", f"{output_dir}/asr/{video_file.split('.')[:-1]}/asr.json", f"{output_dir}/asd")
         
-        video_paths = []
-        for mp4_file in glob.glob(os.path.join(output_dir, "asd", "*.mp4")):
-            video_path.append(mp4_file)
+        # video_paths = []
+        # for mp4_file in glob.glob(os.path.join(output_dir, "asd", "*.mp4")):
+        #     video_path.append(mp4_file)
 
-        for video in video_paths:
-            gemini_output = run_gemini(video)
-            emotion_info = find_words_in_sentence(
-                text_normalize[gemini_output.split('.')[0]], EMOTION_CATEGORIES)
+        # for video in video_paths:
+        #     gemini_output = run_gemini(video)
+        #     emotion_info = find_words_in_sentence(
+        #         text_normalize[gemini_output.split('.')[0]], EMOTION_CATEGORIES)
 
-            with open(os.path.join(output_dir, "emotion_audio.json"), "a") as f:
-                f.write(f'{{"video": "{video}", "gemini_output": "{gemini_output}", "emotion_info": {emotion_info}}}\n')
+        #     with open(os.path.join(output_dir, "emotion_audio.json"), "a") as f:
+        #         f.write(f'{{"video": "{video}", "gemini_output": "{gemini_output}", "emotion_info": {emotion_info}}}\n')
 
+
+@click.command()
+@click.option("--input-dir", "-i", required=True, help="Input directory containing video files")
+@click.option("--output-dir", "-o", required=True, help="Output directory")
+def main(input_dir, output_dir):
+    pipeline = Pipeline(input_dir, output_dir)
+    pipeline.run(input_dir, output_dir)
+
+if _main_ == "_main_":
+    main()
