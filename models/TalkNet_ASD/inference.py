@@ -43,6 +43,7 @@ def write_video_pyav(filename, video_tensor, fps):
     container.mux(packet)
 
     container.close()
+    os.system(f'ffmpeg -y -i "{filename}" -c:v libx264 -c:a copy "{filename.rsplit(".", 1)[0]}.avi"')
 
 
 def bb_intersection_over_union(boxA, boxB, evalCol=False):
@@ -134,7 +135,6 @@ def crop_video(video_tensor, audio_tensor, track, info, crop_file, cropScale=0.4
         frame = video_tensor[frame_index]
         bs = dets['s'][fidx]
         bsi = int(bs * (1 + 2 * cs))
-        print(frame.shape)
 
         padded_frame = F.pad(
             rearrange(frame, 'h w c -> c h w'),
@@ -155,7 +155,6 @@ def crop_video(video_tensor, audio_tensor, track, info, crop_file, cropScale=0.4
 
         face = padded_frame[:, y1:y2, x1:x2]
 
-        print(face.shape)
         resized_face = F.resize(face, [224, 224])
 
         cropped_frames.append(resized_face)
@@ -198,11 +197,10 @@ def evaluate_network(files, pretrainModel, pycropPath):
 	durationSet = {1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6}
 	for file in tqdm(files, total=len(files)):
 		fileName = os.path.splitext(file.split('/')[-1])[0]
-		print(fileName)
 		_, audio = wavfile.read(os.path.join(pycropPath, fileName + '.wav'))
 		audioFeature = python_speech_features.mfcc(
 			audio, 16000, numcep=13, winlen=0.025, winstep=0.010)
-		video = cv2.VideoCapture(os.path.join(pycropPath, fileName + '.mp4'))
+		video = cv2.VideoCapture(os.path.join(pycropPath, fileName + '.avi'))
 		videoFeature = []
 		while video.isOpened():
 			ret, frames = video.read()
@@ -212,7 +210,6 @@ def evaluate_network(files, pretrainModel, pycropPath):
 				face = face[int(112-(112/2)):int(112+(112/2)),
                                     int(112-(112/2)):int(112+(112/2))]
 				videoFeature.append(face)
-				print(videoFeature)
 			else:
 				break
 		video.release()
@@ -220,7 +217,6 @@ def evaluate_network(files, pretrainModel, pycropPath):
 		length = min((audioFeature.shape[0] - audioFeature.shape[0] %
 		             4) / 100, videoFeature.shape[0] / 25)
 		audioFeature = audioFeature[:int(round(length * 100)), :]
-		print(videoFeature.shape)
 		videoFeature = videoFeature[:int(round(length * 25)), :, :]
 		allScore = []  # Evaluation use TalkNet
 		for duration in durationSet:
@@ -243,5 +239,3 @@ def evaluate_network(files, pretrainModel, pycropPath):
 			(np.mean(np.array(allScore), axis=0)), 1).astype(float)
 		allScores.append(allScore)
 	return allScores
-
-

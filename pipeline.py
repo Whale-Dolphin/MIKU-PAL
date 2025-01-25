@@ -168,15 +168,37 @@ class Pipeline:
 
             allTracks.extend(track_shot(numFailedDet, minTrack, minFaceSize, faces))
 
-        cropPath = f'{output_path}/croped'
-        for ii, track in tqdm(enumerate(allTracks), total=len(allTracks)):
-            vidTracks.append(crop_video(frames, audios, track, info,
-                                        f'{cropPath}/{ii:05d}'))
+            cropPath = f'{output_path}/croped'
+            for ii, track in tqdm(enumerate(allTracks), total=len(allTracks)):
+                vidTracks.append(crop_video(frames, audios, track, info,
+                                            f'{cropPath}/{ii:05d}'))
 
-        files = glob.glob("%s/*.avi" % cropPath)
+            files = glob.glob("%s/*.avi" % cropPath)
 
-        files.sort()
-        scores = evaluate_network(files, model_path, cropPath)
+            files.sort()
+            scores = evaluate_network(files, model_path, cropPath)
 
-        
+       	for tidx, track in enumerate(vidTracks):
+            score = scores[tidx]
+            for fidx, frame in enumerate(track['track']['frame'].tolist()):
+                s = np.mean(score[max(fidx - 2, 0): min(fidx + 3, len(score) - 1)])
+                faces[frame].append({'track': tidx, 'score': float(s), 's': track['proc_track']['s']
+                                [fidx], 'x': track['proc_track']['x'][fidx], 'y': track['proc_track']['y'][fidx]})
+
+        track_scores = {}
+        for frame_faces in faces:
+            for face_info in frame_faces:
+                t_id = face_info['track']
+                track_scores.setdefault(t_id, []).append(face_info['score'])
+
+        best_track, best_score = None, float('-inf')
+        for t_id, scores_list in track_scores.items():
+            avg_score = sum(scores_list) / len(scores_list)
+            if avg_score > best_score:
+                best_track, best_score = t_id, avg_score
+
+        return best_track, best_score
+
+    # def run_gemini()
+
 
