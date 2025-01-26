@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from models.dsfd.detect import DSFDDetector
-from utils import sanitize_filenames_in_directory
+from models.dsfd.utils import sanitize_filenames_in_directory
 
 
 class FaceDetect:

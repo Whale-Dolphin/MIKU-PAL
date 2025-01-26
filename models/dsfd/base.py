@@ -8,7 +8,7 @@ import typing
 from abc import ABC, abstractmethod
 from torchvision.ops import nms
 
-from box_utils import scale_boxes
+from models.dsfd.box_utils import scale_boxes
 
 
 def check_image(im: np.ndarray):

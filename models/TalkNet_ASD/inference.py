@@ -43,7 +43,7 @@ def write_video_pyav(filename, video_tensor, fps):
     container.mux(packet)
 
     container.close()
-    os.system(f'ffmpeg -y -i "{filename}" -c:v libx264 -c:a copy "{filename.rsplit(".", 1)[0]}.avi"')
+    os.system(f'ffmpeg -y -i "{filename}" -c:v libx264 -c:a copy "{filename.rsplit(".", 1)[0]}.avi" 2>&1 | grep -i "warning\|error"')
 
 
 def bb_intersection_over_union(boxA, boxB, evalCol=False):
@@ -97,21 +97,9 @@ def track_shot(numFailedDet, minTrack, minFaceSize, sceneFaces):
 	return tracks
 
 
-def crop_video(video_tensor, audio_tensor, track, info, crop_file, cropScale=0.40):
-    """Crops a video and audio tensor based on tracking data and saves the result to local.
+def crop_video(video_tensor, audio, track, info, crop_file, cropScale=0.40):
 
-    Args:
-        video_tensor: A tensor of shape (T, C, H, W) representing the video.
-        audio_tensor: A tensor of shape (S,) representing the audio waveform. S is the number of samples.
-        track: A dictionary containing tracking information, including 'bbox' (bounding boxes) and 'frame' (frame indices).
-        crop_file: The base filename for saving the cropped video and audio.
-
-    Returns:
-        A dictionary containing the original `track`, the processed detection data `dets`, and the path of the cropped video and audio.
-        Returns None if track or video_tensor is invalid.
-    """
-
-    if video_tensor is None or audio_tensor is None or track is None or 'bbox' not in track or 'frame' not in track:
+    if video_tensor is None or audio is None or track is None or 'bbox' not in track or 'frame' not in track:
         return None
 
     audio_sample_rate = info['audio_fps']
@@ -176,15 +164,11 @@ def crop_video(video_tensor, audio_tensor, track, info, crop_file, cropScale=0.4
 
     audio_start_frame = track['frame'][0]
     audio_end_frame = track['frame'][-1]
-    audio_start_sample = int(audio_start_frame / video_fps *
-                             audio_sample_rate)
-    audio_end_sample = int((audio_end_frame + 1) /
-                           video_fps * audio_sample_rate)
-    cropped_audio = audio_tensor[:, audio_start_sample:audio_end_sample]
+    audio_start_sample = int(audio_start_frame / video_fps * audio_sample_rate)
+    audio_end_sample = int((audio_end_frame + 1) / video_fps * audio_sample_rate)
+    cropped_audio = audio_tensor[ audio_start_sample:audio_end_sample, :]
     audio_path = crop_file + ".wav"
-    cropped_audio = rearrange(cropped_audio, 'c s -> s c')
-    print(audio_path, cropped_audio.shape, audio_sample_rate)
-    sf.write(audio_path, cropped_audio.numpy(), audio_sample_rate, format='WAV')
+    sf.write(audio_path, cropped_audio, audio_sample_rate, format='WAV')
 
     return {'track': track, 'proc_track': dets, 'video_path': video_path, 'audio_path': audio_path}
 

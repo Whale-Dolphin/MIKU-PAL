@@ -3,10 +3,11 @@
 *.pt
 *.log
 *.ipynb
+*.list
 
 checkpoints/
 *__pycache__/
 outputs/
 *fish_data_engine/
 dataset/
-
+output/

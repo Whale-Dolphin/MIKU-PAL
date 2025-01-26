@@ -5,10 +5,10 @@ import numpy as np
 import torch
 from torch.hub import load_state_dict_from_url
 
-from base import Detector
-from config import resnet152_model_config
-from face_ssd import SSD
-from torch_utils import *
+from models.dsfd.base import Detector
+from models.dsfd.config import resnet152_model_config
+from models.dsfd.face_ssd import SSD
+from models.dsfd.torch_utils import *
 
 model_url = "https://api.loke.aws.unit.no/dlr-gui-backend-resources-content/v2/contents/links/61be4ec7-8c11-4a4a-a9f4-827144e4ab4f0c2764c1-80a0-4083-bbfa-68419f889b80e4692358-979b-458e-97da-c1a1660b3314"
 

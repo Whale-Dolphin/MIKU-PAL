@@ -1,12 +1,17 @@
-import sys
-import os
-import glob
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
 
 import av
 import click
 from loguru import logger
+import numpy as np
+import soundfile as sf
 from torchvision.io import read_video
 from tqdm import tqdm
 
@@ -15,10 +20,14 @@ from models.fish_data_engine.tasks.align import WhisperAlignTask
 from models.fish_data_engine.tasks.asr import ASR
 from models.dsfd.inference import FaceDetect
 from models.TalkNet_ASD.inference import crop_video
+from models.TalkNet_ASD.inference import track_shot
+from models.TalkNet_ASD.inference import evaluate_network
 from gemini import run_gemini
 
 
-logger.add('pipeline.log', format="{time} {level} {message}", level="DEBUG")
+os.makedirs('logs', exist_ok=True)
+log_filename = f'logs/pipeline_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+logger.add(log_filename, format="{time} {level} {message}", level="DEBUG")
 
 EMOTION_CATEGORIES = [
     "angry",
@@ -31,6 +40,7 @@ EMOTION_CATEGORIES = [
     "surprised",
     "disgusted",
 ]
+
 
 def get_video_fps(video_path):
     try:
@@ -64,6 +74,25 @@ class Pipeline:
     def __init__(self, input_dir, output_dir):
         self.input_dir = input_dir
         self.output_dir = output_dir
+        confidence_threshold = 0.5
+        nms_iou_threshold = 0.3
+        max_resolution = 640
+        shrink = 1
+        device = 'cuda'
+        fp16_inference = True
+        clip_boxes = True
+        model_path = 'checkpoints/dsfd.pth'
+        data_name = 'face_detect'
+        print(type(model_path))
+        self.fd = FaceDetect(
+            confidence_threshold=confidence_threshold,
+            nms_iou_threshold=nms_iou_threshold,
+            max_resolution=max_resolution,
+            device=device,
+            fp16_inference=fp16_inference,
+            clip_boxes=clip_boxes,
+            model_path=model_path
+        )
 
     def run_uvr(
         self,
@@ -85,7 +114,8 @@ class Pipeline:
         if output_dir is None:
             output_dir = os.path.join(self.output_dir, 'uvr')
 
-        logger.debug(f'Running UVR with input={input_dir}, output={output_dir}')
+        logger.debug(
+            f'Running UVR with input={input_dir}, output={output_dir}')
 
         uvr = UVR(
             input_dir=input_dir,
@@ -121,7 +151,8 @@ class Pipeline:
         if output_dir is None:
             output_dir = os.path.join(self.output_dir, 'asr')
 
-        logger.debug(f'Running ASR with input={input_dir}, output={output_dir}')
+        logger.debug(
+            f'Running ASR with input={input_dir}, output={output_dir}')
 
         asr = ASR(
             input_dir=input_dir,
@@ -137,67 +168,62 @@ class Pipeline:
         )
         asr.run()
 
-    def run_face_detect(
-        self,
-        frames,
-        confidence_threshold=0.5,
-        nms_iou_threshold=0.3,
-        max_resolution=640,
-        shrink=1,
-        device='cuda',
-        fp16_inference=True,
-        clip_boxes=True,
-        model_path='checkpoints/dsfd.pth',
-        data_name='face_detect',
-    ):  
-        # logger.debug(f'Running Face Detect with input={input_dir}, output={output_dir}')
-
-        self.fd = FaceDetect(
-            confidence_threshold=confidence_threshold,
-            nms_iou_threshold=nms_iou_threshold,
-            max_resolution=max_resolution,
-            device=device,
-            fp16_inference=fp16_inference,
-            clip_boxes=clip_boxes,
-            model_path=model_path
-        )
-
     def run_asd(
         self,
         input_path,
         asr_output_path,
         output_path,
-        model_path = 'checkpoints/pretrain_TalkSet.model',
-        numFailedDet = 10,
-        minTrack = 10,
-        minFaceSize = 1,
+        audio_path,
+        model_path='checkpoints/pretrain_TalkSet.model',
+        numFailedDet=10,
+        minTrack=10,
+        minFaceSize=1,
 
     ):
-        logger.debug(f'Running ASD with input={input_dir}, output={output_dir}')
+        logger.debug(
+            f'Running ASD with input={input_path}, asr_output={asr_output_path}, [[output={output_path}')
 
         fps = get_video_fps(input_path)
         with open(asr_output_path, 'r') as f:
-            data = json.laod(f)
+            data = json.load(f)
+
+        logger.debug(data)
+
+        final_mp4s, best_track_wavs = [], []
 
         for i, scene in enumerate(data):
             allTracks, vidTracks = [], []
             scene_start = scene['start']
             scene_end = scene['end']
 
-            frames, audios, info = read_video(
-                video_path=input_path,
+            frames, _, info = read_video(
+                input_path,
                 start_pts=scene_start,
                 end_pts=scene_end,
                 pts_unit='sec')
 
+            start_frame = int(scene_start * info['audio_fps'])
+            end_frame = int(scene_end * infp['audio_fps'])
+            audios, _ = sf.read(
+                file_path,
+                start=start_frame,
+                frames=end_frame - start_frame,
+            )
+
+            logger.debug(frames.shape)
+
             info['fps'] = fps
 
             faces = self.fd.run(frames)
+            if not faces:
+                continue
 
-            allTracks.extend(track_shot(numFailedDet, minTrack, minFaceSize, faces))
+
+            allTracks.extend(track_shot(
+                numFailedDet, minTrack, minFaceSize, faces))
 
             cropPath = f'{output_path}/croped/{i}'
-            os.makedir(cropPath, exist_ok=True)
+            os.makedirs(cropPath, exist_ok=True)
             for ii, track in tqdm(enumerate(allTracks), total=len(allTracks)):
                 vidTracks.append(crop_video(frames, audios, track, info,
                                             f'{cropPath}/{ii:05d}'))
@@ -210,15 +236,17 @@ class Pipeline:
             for tidx, track in enumerate(vidTracks):
                 score = scores[tidx]
                 for fidx, frame in enumerate(track['track']['frame'].tolist()):
-                    s = np.mean(score[max(fidx - 2, 0): min(fidx + 3, len(score) - 1)])
+                    s = np.mean(
+                        score[max(fidx - 2, 0): min(fidx + 3, len(score) - 1)])
                     faces[frame].append({'track': tidx, 'score': float(s), 's': track['proc_track']['s']
-                                    [fidx], 'x': track['proc_track']['x'][fidx], 'y': track['proc_track']['y'][fidx]})
+                                         [fidx], 'x': track['proc_track']['x'][fidx], 'y': track['proc_track']['y'][fidx]})
 
             track_scores = {}
             for frame_faces in faces:
                 for face_info in frame_faces:
                     t_id = face_info['track']
-                    track_scores.setdefault(t_id, []).append(face_info['score'])
+                    track_scores.setdefault(
+                        t_id, []).append(face_info['score'])
 
             best_track, best_score = None, float('-inf')
             for t_id, scores_list in track_scores.items():
@@ -226,9 +254,12 @@ class Pipeline:
                 if avg_score > best_score:
                     best_track, best_score = t_id, avg_score
 
-            best_track_mp4 = f"{cropPath}/{best_track}.mp4"
-            best_track_wav = f"{cropPath}/{best_track}.wav"
+            best_track_mp4 = f"{cropPath}/{best_track:05d}.mp4"
+            best_track_wav = f"{cropPath}/{best_track:05d}.wav"
             final_mp4 = f"{output_path}/{i}.mp4"
+
+            final_mp4s.append(final_mp4)
+            best_track_wavs.append(best_track_wav)
 
             cmd = [
                 "ffmpeg", "-y",
@@ -240,66 +271,104 @@ class Pipeline:
             ]
             subprocess.run(cmd, check=True)
 
-        return
+        return final_mp4s, best_track_wavs
 
     def run(
         self,
         input_dir,
-        output_dir
+        output_dir,
+        stage=0,
+        stop_stage=3,
     ):
+        logger.info(
+            f"Running pipeline with input_dir={input_dir}, output_dir={output_dir}, stage={stage}, stop_stage={stop_stage}")
         video_files = []
         for pattern in ("*.mp4", "*.avi", "*.mkv", "*.mov"):
             video_files.extend(glob.glob(os.path.join(input_dir, pattern)))
-        print(f"Found video files: {video_files}")
-        
-        os.makedirs(os.path.join(output_dir, "raw_audio"), exist_ok=True)
+        logger.info(f"Found video files: {video_files}")
+        if stage == 0 and stop_stage >= 0:
+            logger.info('Stage 0: Extract raw audio files')
 
-        def extract_audio(video_file):
-            base_name = os.path.splitext(os.path.basename(video_file))[0]
-            output_wav = os.path.join(output_dir, "raw_audio", f"{base_name}.wav")
-            cmd = [
-            "ffmpeg",
-            "-y",
-            "-i", video_file,
-            "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", "44100",
-            "-ac", "2",
-            "-threads", "8",
-            output_wav
-            ]
-            subprocess.run(cmd, check=True)
+            os.makedirs(os.path.join(output_dir, "raw_audio"), exist_ok=True)
 
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            executor.map(extract_audio, video_files)
+            def extract_audio(video_file):
+                base_name = os.path.splitext(os.path.basename(video_file))[0]
+                output_wav = os.path.join(
+                    output_dir, "raw_audio", f"{base_name}.wav")
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i", video_file,
+                    "-vn",
+                    "-acodec", "pcm_s16le",
+                    output_wav
+                ]
+                subprocess.run(cmd, check=True)
 
-        os.makedir(os.path.join(output_dir, "uvr"), exist_ok=True)
-        self.run_uvr(f"{output_dir}/raw_audio", f"{output_dir}/uvr")
-        os.makedir(os.path.join(output_dir, "asr"), exist_ok=True)
-        self.run_asr(f"{output_dir}/uvr", f"{output_dir}/asr")
-        os.makedir(os.path.join(output_dir, "asd"), exist_ok=True)
-        for video_file in video_files:
-            best_track, best_score = self.run_asd(f"{video_file}", f"{output_dir}/asr/{video_file.split('.')[:-1]}/asr.json", f"{output_dir}/asd")
-        
-        # video_paths = []
-        # for mp4_file in glob.glob(os.path.join(output_dir, "asd", "*.mp4")):
-        #     video_path.append(mp4_file)
+            with ThreadPoolExecutor(max_workers=32) as executor:
+                executor.map(extract_audio, video_files)
 
-        # for video in video_paths:
-        #     gemini_output = run_gemini(video)
-        #     emotion_info = find_words_in_sentence(
-        #         text_normalize[gemini_output.split('.')[0]], EMOTION_CATEGORIES)
+            stage += 1
 
-        #     with open(os.path.join(output_dir, "emotion_audio.json"), "a") as f:
-        #         f.write(f'{{"video": "{video}", "gemini_output": "{gemini_output}", "emotion_info": {emotion_info}}}\n')
+        os.makedirs(os.path.join(output_dir, "uvr"), exist_ok=True)
+        raw_audio_dir = os.path.abspath(os.path.join(output_dir, "raw_audio"))
+        uvr_output_dir = os.path.abspath(os.path.join(output_dir, "uvr"))
+        if stage == 1 and stop_stage >= 1:
+            logger.info('Stage 1: Run UVR')
+
+            self.run_uvr(raw_audio_dir, uvr_output_dir)
+            shutil.rmtree(raw_audio_dir, ignore_errors=True)
+            stage += 1
+
+        os.makedirs(os.path.join(output_dir, "asr"), exist_ok=True)
+        asr_output_dir = os.path.abspath(os.path.join(output_dir, "asr"))
+        if stage == 2 and stop_stage >= 2:
+            logger.info('Stage 2: Run ASR')
+            self.run_asr(uvr_output_dir, asr_output_dir)
+            stage += 1
+
+        if stage == 3 and stop_stage >= 3:
+            final_mp4ss, best_track_wavss = [], []
+            logger.info('Stage 3: Run Face Detect and ASD')
+            os.makedirs(os.path.join(output_dir, "asd"), exist_ok=True)
+            for video_file in video_files:
+                video_name = os.path.splitext(os.path.basename(video_file))[0]
+                final_mp4s, best_track_wavs = self.run_asd(
+                    f"{video_file}", f"{output_dir}/asr/{video_name}/asr.json", f"{output_dir}/asd/{video_name}", f"{output_dir}/uvr/{video_name}.wav")
+                for i, j in zip(final_mp4s, best_track_wavs):
+                    final_mp4ss.append(i)
+                    best_track_wavss.append(j)
+            with open(f'{output_dir}final_video_list.list', 'w') as f1:
+                f1.write('\n'.join(final_mp4ss))
+            with open(f'{output_dir}final_wav_list.list', 'w') as f2:
+                f2.write('\n'.join(best_track_wavss))
+            stage += 1
+
+        if stage == 4 and stop_stage >= 4:
+            logger.info('Stage 4: Run Gemini')
+            video_paths = []
+            for mp4_file in glob.glob(os.path.join(output_dir, "asd", "*.mp4")):
+                video_path.append(mp4_file)
+
+            for video in video_paths:
+                gemini_output = run_gemini(video)
+                emotion_info = find_words_in_sentence(
+                    text_normalize[gemini_output.split('.')[0]], EMOTION_CATEGORIES)
+
+                with open(os.path.join(output_dir, "emotion_audio.json"), "a") as f:
+                    f.write(
+                        f'{{"video": "{video}", "gemini_output": "{gemini_output}", "emotion_info": {emotion_info}}}\n')
 
 
 @click.command()
 @click.option("--input-dir", "-i", required=True, help="Input directory containing video files")
 @click.option("--output-dir", "-o", required=True, help="Output directory")
-def main(input_dir, output_dir):
+@click.option("--stage", default=0, help="Start stage")
+@click.option("--stop-stage", default=3, help="Stop stage")
+def main(input_dir, output_dir, stage, stop_stage):
     pipeline = Pipeline(input_dir, output_dir)
-    pipeline.run(input_dir, output_dir)
+    pipeline.run(input_dir, output_dir, stage, stop_stage)
 
-if _main_ == "_main_":
+
+if __name__ == "__main__":
     main()
