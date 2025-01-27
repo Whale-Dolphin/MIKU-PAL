@@ -166,7 +166,7 @@ def crop_video(video_tensor, audio, track, info, crop_file, cropScale=0.40):
     audio_end_frame = track['frame'][-1]
     audio_start_sample = int(audio_start_frame / video_fps * audio_sample_rate)
     audio_end_sample = int((audio_end_frame + 1) / video_fps * audio_sample_rate)
-    cropped_audio = audio_tensor[ audio_start_sample:audio_end_sample, :]
+    cropped_audio = audio[ audio_start_sample:audio_end_sample, :]
     audio_path = crop_file + ".wav"
     sf.write(audio_path, cropped_audio, audio_sample_rate, format='WAV')
 

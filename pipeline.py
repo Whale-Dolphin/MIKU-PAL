@@ -70,6 +70,16 @@ def find_words_in_sentence(sentence, words):
     return found_words
 
 
+class ProcessorFactory:
+    @staticmethod
+    def create_uvr(**kwargs):
+        return UVR(**kwargs)
+
+    @staticmethod
+    def create_asr(**kwargs):
+        return ASR(**kwargs)
+ 
+
 class Pipeline:
     def __init__(self, input_dir, output_dir):
         self.input_dir = input_dir
@@ -93,6 +103,7 @@ class Pipeline:
             clip_boxes=clip_boxes,
             model_path=model_path
         )
+        self.factory = ProcessorFactory()
 
     def run_uvr(
         self,
@@ -117,7 +128,7 @@ class Pipeline:
         logger.debug(
             f'Running UVR with input={input_dir}, output={output_dir}')
 
-        uvr = UVR(
+        uvr = self.factory.create_uvr(
             input_dir=input_dir,
             output_dir=output_dir,
             demix=demix,
@@ -154,7 +165,7 @@ class Pipeline:
         logger.debug(
             f'Running ASR with input={input_dir}, output={output_dir}')
 
-        asr = ASR(
+        asr = self.factory.create_asr(
             input_dir=input_dir,
             output_dir=output_dir,
             language=language,
@@ -203,9 +214,9 @@ class Pipeline:
                 pts_unit='sec')
 
             start_frame = int(scene_start * info['audio_fps'])
-            end_frame = int(scene_end * infp['audio_fps'])
+            end_frame = int(scene_end * info['audio_fps'])
             audios, _ = sf.read(
-                file_path,
+                audio_path,
                 start=start_frame,
                 frames=end_frame - start_frame,
             )
@@ -324,6 +335,7 @@ class Pipeline:
         asr_output_dir = os.path.abspath(os.path.join(output_dir, "asr"))
         if stage == 2 and stop_stage >= 2:
             logger.info('Stage 2: Run ASR')
+            logger.debug(f"ASR inputdir {uvr_output_dir}, ASR outputdir {asr_output_dir}")
             self.run_asr(uvr_output_dir, asr_output_dir)
             stage += 1
 
