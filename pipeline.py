@@ -93,7 +93,6 @@ class Pipeline:
         clip_boxes = True
         model_path = 'checkpoints/dsfd.pth'
         data_name = 'face_detect'
-        print(type(model_path))
         self.fd = FaceDetect(
             confidence_threshold=confidence_threshold,
             nms_iou_threshold=nms_iou_threshold,
@@ -328,7 +327,6 @@ class Pipeline:
             logger.info('Stage 1: Run UVR')
 
             self.run_uvr(raw_audio_dir, uvr_output_dir)
-            shutil.rmtree(raw_audio_dir, ignore_errors=True)
             stage += 1
 
         os.makedirs(os.path.join(output_dir, "asr"), exist_ok=True)

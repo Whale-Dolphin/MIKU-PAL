@@ -1,5 +1,6 @@
 import os
 import math
+import subprocess
 
 import av
 import numpy as np
@@ -43,8 +44,19 @@ def write_video_pyav(filename, video_tensor, fps):
     container.mux(packet)
 
     container.close()
-    os.system(f'ffmpeg -y -i "{filename}" -c:v libx264 -c:a copy "{filename.rsplit(".", 1)[0]}.avi" 2>&1 | grep -i "warning\|error"')
-
+    subprocess.run([
+        'ffmpeg',
+        '-v', 'quiet',
+        '-y',
+        '-i', filename,
+        '-c:v', 'libx264',
+        '-c:a', 'copy',
+        f'{filename.rsplit(".", 1)[0]}.avi'
+    ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True
+	)
 
 def bb_intersection_over_union(boxA, boxB, evalCol=False):
 	# CPU: IOU Function to calculate overlap between two image
